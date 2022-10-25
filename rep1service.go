@@ -1,6 +1,7 @@
 package main
 
 import (
+  "database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,13 +12,11 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapio"
-
 	"github.com/radiochild/repmeta"
 	"github.com/radiochild/utils"
-
-	"github.com/jackc/pgx"
-	_ "github.com/jackc/pgx/v4"
+  _ "github.com/mattn/go-sqlite3"
 )
+
 
 // --------------------------------------------------------------------------------
 // Database record retrieval
@@ -25,7 +24,8 @@ import (
 // --------------------------------------------------------------------------------
 type DetailHandler func(ctx interface{}, dR *repmeta.DataRow)
 
-func retrieveRecs(pDB *pgx.Conn, qry string, spec *repmeta.ReportSpec, ctx interface{}, dH DetailHandler) error {
+// pDB was *pgx.Conn
+func retrieveRecs(pDB *sql.DB,  qry string, spec *repmeta.ReportSpec, ctx interface{}, dH DetailHandler) error {
 
 	rows, err := pDB.Query(qry)
 	defer func() {
@@ -46,6 +46,7 @@ func retrieveRecs(pDB *pgx.Conn, qry string, spec *repmeta.ReportSpec, ctx inter
 
 		err = rows.Scan(ptrs...)
 		if err != nil {
+      fmt.Printf("rows.Scan(ptrs) failed\n")
 			return err
 		}
 		// DetailHandler takes care of the record
@@ -61,8 +62,18 @@ func retrieveRecs(pDB *pgx.Conn, qry string, spec *repmeta.ReportSpec, ctx inter
 type Rep1Service struct {
 	logger    *zap.SugaredLogger
 	logWriter io.Writer
-	pDB       *pgx.Conn
+  pDB       *sql.DB
 	args      *CmdArgs
+}
+
+func IsSqliteDB(dbName string) bool {
+  return strings.HasPrefix(dbName, "sqlite.")
+}
+
+func SqliteDBName(dbname string) string {
+  parts := strings.SplitN(dbname, "sqlite.", 2)
+  lx := len(parts)
+  return parts[lx-1]
 }
 
 func NewRep1Service(pArgs *CmdArgs, dbp *DBParams) *Rep1Service {
@@ -71,20 +82,26 @@ func NewRep1Service(pArgs *CmdArgs, dbp *DBParams) *Rep1Service {
 
 	logger.Info(appTitle())
 	logger.Info(fullVersion())
-	pConnCfg, err := utils.NewDBConfig(dbp.User, dbp.Password, dbp.Host, dbp.Database)
-	if err != nil {
-		logger.Fatal(err.Error())
-	}
-
-	// Connect to database
-	pDB, err := pgx.Connect(*pConnCfg)
-	if err != nil {
-		logger.Fatal(err)
-	}
+  var err error
+  var db *sql.DB
+  if IsSqliteDB(dbp.Database) {
+    dbName := SqliteDBName(dbp.Database)
+    db, err = sql.Open("sqlite3", dbName)
+    if err != nil {
+      logger.Fatal(err.Error())
+    }
+  } else {
+    pConnCfg, err := utils.NewDBConfig(dbp.User, dbp.Password, dbp.Host, dbp.Database)
+    if err != nil {
+      logger.Fatal(err.Error())
+    }
+    // Connect to database
+    logger.Fatalf("Postgres not supported: %v", pConnCfg)
+  }
 	svc := Rep1Service{
 		logger:    logger,
 		logWriter: logWriter,
-		pDB:       pDB,
+		pDB:       db,
 		args:      pArgs,
 	}
 	return &svc
@@ -196,7 +213,7 @@ func (svc *Rep1Service) CmdHandler() {
 
 func (svc *Rep1Service) Close() error {
 	svc.logger.Info("Request to close Rep1Service")
-	if svc.pDB == nil {
+	if svc.pDB != nil {
 		svc.pDB.Close()
 		svc.pDB = nil
 		svc.logger.Info("Closing Rep1Service")

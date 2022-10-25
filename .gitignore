@@ -2,3 +2,5 @@ build/
 .DS_Store
 *spec.json
 *.rpt
+*.txt
+*.db

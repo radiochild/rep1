@@ -1,6 +1,7 @@
 package main
 
 import (
+  "context"
   "database/sql"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,11 @@ import (
 	"github.com/radiochild/repmeta"
 	"github.com/radiochild/utils"
   _ "github.com/mattn/go-sqlite3"
+
+  "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+  "github.com/aws/smithy-go"
 )
 
 
@@ -64,6 +70,9 @@ type Rep1Service struct {
 	logWriter io.Writer
   pDB       *sql.DB
 	args      *CmdArgs
+  bucketName string
+  awsConfig aws.Config
+  s3Client  *s3.Client
 }
 
 func IsSqliteDB(dbName string) bool {
@@ -74,6 +83,10 @@ func SqliteDBName(dbname string) string {
   parts := strings.SplitN(dbname, "sqlite.", 2)
   lx := len(parts)
   return parts[lx-1]
+}
+
+func NeedsS3(pArgs *CmdArgs) bool {
+  return len(pArgs.BucketName) > 0
 }
 
 func NewRep1Service(pArgs *CmdArgs, dbp *DBParams) *Rep1Service {
@@ -98,11 +111,45 @@ func NewRep1Service(pArgs *CmdArgs, dbp *DBParams) *Rep1Service {
     // Connect to database
     logger.Fatalf("Postgres not supported: %v", pConnCfg)
   }
+
+  var awsConfig aws.Config
+  var s3Client *s3.Client
+
+  bucketName := pArgs.BucketName
+  useS3 := len(bucketName) > 0
+  if useS3 {
+    awsConfig, err = config.LoadDefaultConfig(context.TODO())
+    if err != nil {
+      logger.Fatal(err.Error())
+    }
+	  s3Client = s3.NewFromConfig(awsConfig)
+
+    // Make sure bucket exists (requires s3:GetBucketTagging rights)
+    ctx := context.TODO()
+    taggingInput := s3.GetBucketTaggingInput {
+      Bucket: aws.String(bucketName),
+    }
+    _, err := s3Client.GetBucketTagging(ctx, &taggingInput)
+    if err != nil {
+      var ae smithy.APIError
+      if errors.As(err, &ae) {
+        code := ae.ErrorCode()
+        if code == "NoSuchBucket" {
+          logger.Infof("Bucket %q: %s", bucketName, ae.ErrorMessage())
+          bucketName = ""
+        }
+      }
+    }
+  }
+
 	svc := Rep1Service{
 		logger:    logger,
 		logWriter: logWriter,
 		pDB:       db,
 		args:      pArgs,
+    awsConfig: awsConfig,
+    s3Client:  s3Client,
+    bucketName: bucketName,
 	}
 	return &svc
 }
@@ -172,7 +219,7 @@ func (svc *Rep1Service) Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	// w.WriteHeader(http.StatusOK)
 
-	rW := repmeta.NewReportWriter(svc.logger, w, svc.args.OutputType, svc.args.HideDetails, svc.args.Spec)
+	rW := repmeta.NewReportWriter(svc.logger, w, svc.args.OutputType, svc.args.HideDetails, svc.args.Spec, svc.s3Client, svc.bucketName)
 
 	// Fetch and Display records according to spec
 	qry := repmeta.FormatQuery(svc.args.Spec, svc.args.Limit, svc.logger)
@@ -197,8 +244,7 @@ func (svc *Rep1Service) CmdHandler() {
 			defer outfile.Close()
 		}
 	}
-
-	rW := repmeta.NewReportWriter(svc.logger, outfile, svc.args.OutputType, svc.args.HideDetails, svc.args.Spec)
+	rW := repmeta.NewReportWriter(svc.logger, outfile, svc.args.OutputType, svc.args.HideDetails, svc.args.Spec, svc.s3Client, svc.bucketName)
 
 	// Fetch and Display records according to spec
 	qry := repmeta.FormatQuery(svc.args.Spec, svc.args.Limit, svc.logger)

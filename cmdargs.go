@@ -24,6 +24,7 @@ type CmdArgs struct {
 	CmdExec     bool
 	Version     bool
 	ServerPort  int
+  BucketName  string
 }
 
 func NewCmdArguments() *CmdArgs {
@@ -38,6 +39,7 @@ func NewCmdArguments() *CmdArgs {
 	pVersion := flag.Bool("version", false, "command version")
 	pAltVersion := flag.Bool("v", false, "shorthand command version")
 	pServerPort := flag.Int("port", 0, "http server port")
+	pBucketName := flag.String("bucket", "", "bucket name [lowercase a-z 0-9 or -]")
 	flag.Parse()
 
 	pSpec, _ := repmeta.ReadReportSpec(*pSpecsFile)
@@ -61,6 +63,8 @@ func NewCmdArguments() *CmdArgs {
 		*pCmd = wantVersion
 	}
 
+  bucketName := strings.ToLower(strings.TrimSpace(*pBucketName))
+
 	args := CmdArgs{
 		Spec:        pSpec,
 		Limit:       *pLimit,
@@ -71,6 +75,7 @@ func NewCmdArguments() *CmdArgs {
 		CmdExec:     *pCmd,
 		ServerPort:  *pServerPort,
 		Version:     wantVersion,
+    BucketName:  bucketName,
 	}
 
 	// If CmdArgs were not specified for LogLevel:

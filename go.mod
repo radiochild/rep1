@@ -15,7 +15,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/jackc/pgx/v4 v4.17.0
 	github.com/mattn/go-sqlite3 v1.14.15
-	github.com/radiochild/repmeta v0.1.2
+	github.com/radiochild/repmeta v0.1.4
 	github.com/radiochild/utils v0.1.2
 	go.uber.org/zap v1.23.0
 )

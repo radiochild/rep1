@@ -219,7 +219,7 @@ func (svc *Rep1Service) Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	// w.WriteHeader(http.StatusOK)
 
-	rW := repmeta.NewReportWriter(svc.logger, w, svc.args.OutputType, svc.args.HideDetails, svc.args.Spec, svc.s3Client, svc.bucketName)
+	rW := repmeta.NewReportWriter(svc.logger, w, svc.args.OutputType, svc.args.OutputFile, svc.args.HideDetails, svc.args.Spec, svc.s3Client, svc.bucketName)
 
 	// Fetch and Display records according to spec
 	qry := repmeta.FormatQuery(svc.args.Spec, svc.args.Limit, svc.logger)
@@ -230,21 +230,31 @@ func (svc *Rep1Service) Handler(w http.ResponseWriter, r *http.Request) {
 	repmeta.DetailWriter(rW, nil)
 
 	rW.ProcessGrandTotals()
+  err = rW.Close()
+	if err != nil {
+		svc.logger.Fatalf(err.Error())
+	}
 }
 
 func (svc *Rep1Service) CmdHandler() {
 	svc.logger.Info("Cmdline request")
 
+  bucketName := svc.args.BucketName
+  useS3 := len(bucketName) > 0
+
 	fileName := strings.TrimSpace(svc.args.OutputFile)
 	outfile := os.Stdout
-	if len(fileName) > 0 {
-		f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-		if err == nil {
-			outfile = f
-			defer outfile.Close()
-		}
-	}
-	rW := repmeta.NewReportWriter(svc.logger, outfile, svc.args.OutputType, svc.args.HideDetails, svc.args.Spec, svc.s3Client, svc.bucketName)
+
+  if !useS3 {
+    if len(fileName) > 0 {
+      f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+      if err == nil {
+        outfile = f
+        defer outfile.Close()
+      }
+    }
+  }
+	rW := repmeta.NewReportWriter(svc.logger, outfile, svc.args.OutputType, fileName, svc.args.HideDetails, svc.args.Spec, svc.s3Client, svc.bucketName)
 
 	// Fetch and Display records according to spec
 	qry := repmeta.FormatQuery(svc.args.Spec, svc.args.Limit, svc.logger)
@@ -255,6 +265,10 @@ func (svc *Rep1Service) CmdHandler() {
 	repmeta.DetailWriter(rW, nil)
 
 	rW.ProcessGrandTotals()
+  err = rW.Close()
+	if err != nil {
+		svc.logger.Fatalf(err.Error())
+	}
 }
 
 func (svc *Rep1Service) Close() error {
